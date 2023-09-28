@@ -4,11 +4,11 @@ class global_module {
     /**
      *
      * @param {*} selector 
-     * @param {*} iframe  
+     * @param {*} iframe 
      * @param {*} callback 
      * @param {*} time  
      * @param {*} timeout 
-     * @param {*} baseElement 
+     * @param {*} baseElement  
      * @returns
      */
     static async waitForElement(selectors, iframe = null, callback = null, time = 100, timeout = 1000 * 30, baseElement = null, index = null, isWrapped = true) {
@@ -226,6 +226,12 @@ class global_module {
             });
     }
 
+    static decodeHtmlEntities(htmlString = '') {
+        var tempElement = document.createElement('div');
+        tempElement.innerHTML = htmlString;
+        return tempElement.textContent;
+    }
+
     static GetUrlParm(href = null, name) {
         if (href == null) {
             href = location.href;
@@ -237,6 +243,28 @@ class global_module {
             return decodeURIComponent(r[2]);
         }
         return null;
+    }
+
+    static downloadSvgAsPng(svg, filename) {
+        var canvas = document.createElement('canvas');
+        var context = canvas.getContext('2d');
+        var svgRect = svg.getBoundingClientRect();
+        var width = svgRect.width;
+        var height = svgRect.height;
+        canvas.width = width;
+        canvas.height = height;
+        var image = new Image();
+        var svgData = new XMLSerializer().serializeToString(svg);
+        var svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+        image.onload = function () {
+            context.drawImage(image, 0, 0, width, height);
+            var link = document.createElement('a');
+            link.href = canvas.toDataURL('image/png');
+            link.download = filename;
+            link.click();
+            canvas = null;
+        };
+        image.src = svgUrl;
     }
 
     static SetUrlParm(href, name, value) {
@@ -411,25 +439,34 @@ class global_module {
         return header;
     }
 
-    static MoveElement(obj, GoToX) {
-        if (obj == null) return;
-        if (obj.length > 0) obj = obj[0];
-        let event = document.createEvent('MouseEvents');
-        event.initMouseEvent('mousedown', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
-        obj.dispatchEvent(event);
-        let x = 0;
-        let timer = setInterval(function () {
-            x += 5;
-            let event = document.createEvent('MouseEvents');
-            event.initMouseEvent('mousemove', true, true, window, 0, 0, 0, x, 0, false, false, false, false, 0, null);
-            obj.dispatchEvent(event);
-            if (x >= GoToX) {
-                clearInterval(timer);
-                let event = document.createEvent('MouseEvents');
-                event.initMouseEvent('mouseup', true, true, window, 0, 0, 0, 260, 0, false, false, false, false, 0, null);
-                obj.dispatchEvent(event);
+    static MoveElement(obj, GoToX, speed = 10, scope = null) {
+        return new Promise(async (resolve) => {
+            if (obj == null) {
+                resolve(false);
+                return;
             }
-        }, 10);
+            if (obj.length > 0) obj = obj[0];
+            let event = document.createEvent('MouseEvents');
+            if (scope == null) {
+                scope = window;
+            }
+            event.initMouseEvent('mousedown', true, true, scope, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+            obj.dispatchEvent(event);
+            let x = 0;
+            let timer = setInterval(function () {
+                x += 5;
+                let event = document.createEvent('MouseEvents');
+                event.initMouseEvent('mousemove', true, true, scope, 0, 0, 0, x, 0, false, false, false, false, 0, null);
+                obj.dispatchEvent(event);
+                if (x >= GoToX) {
+                    clearInterval(timer);
+                    let event = document.createEvent('MouseEvents');
+                    event.initMouseEvent('mouseup', true, true, scope, 0, 0, 0, 260, 0, false, false, false, false, 0, null);
+                    obj.dispatchEvent(event);
+                    resolve(true);
+                }
+            }, speed);
+        });
     }
 
     static clickElement(element) {
