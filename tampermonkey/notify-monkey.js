@@ -183,6 +183,12 @@
 
     // Wait for DOM to be ready
     const initNotificationSystem = () => {
+        // Ensure body exists
+        if (!document.body) {
+            setTimeout(initNotificationSystem, 10);
+            return;
+        }
+
         // Create notification container
         let container = document.querySelector('.tm-notification-container');
         if (!container) {
@@ -224,7 +230,8 @@
                     message = '',
                     type = 'info', // success, error, warning, info
                     duration = 0, // 0 means no auto-close, otherwise milliseconds
-                    closable = true
+                    closable = true,
+                    fontSize = 14 // Font size in pixels
                 } = options;
 
                 // Create notification element
@@ -234,6 +241,7 @@
                 // Content
                 const content = document.createElement('div');
                 content.className = 'tm-notification-content';
+                content.style.fontSize = `${fontSize}px`;
                 
                 if (title) {
                     const titleEl = document.createElement('div');
@@ -303,20 +311,20 @@
                 notificationsToClose.forEach(n => this.close(n));
             }
 
-            success(message, title = 'Success', duration = 3000) {
-                return this.show({ title, message, type: 'success', duration });
+            success(message, title = 'Success', duration = 3000, fontSize = 14) {
+                return this.show({ title, message, type: 'success', duration, fontSize });
             }
 
-            error(message, title = 'Error', duration = 5000) {
-                return this.show({ title, message, type: 'error', duration });
+            error(message, title = 'Error', duration = 5000, fontSize = 14) {
+                return this.show({ title, message, type: 'error', duration, fontSize });
             }
 
-            warning(message, title = 'Warning', duration = 4000) {
-                return this.show({ title, message, type: 'warning', duration });
+            warning(message, title = 'Warning', duration = 4000, fontSize = 14) {
+                return this.show({ title, message, type: 'warning', duration, fontSize });
             }
 
-            info(message, title = 'Info', duration = 3000) {
-                return this.show({ title, message, type: 'info', duration });
+            info(message, title = 'Info', duration = 3000, fontSize = 14) {
+                return this.show({ title, message, type: 'info', duration, fontSize });
             }
         }
 
