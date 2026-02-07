@@ -9,6 +9,8 @@
  *   - Re-enables Cmd/Ctrl+Option/Shift+J (Open Console) - macOS/Windows/Linux
  *   - Re-enables Cmd/Ctrl+U (View Page Source) - macOS/Windows/Linux
  *   - Re-enables right-click context menu
+ *   - Enables text selection (including double-click selection)
+ *   - Preserves normal element interactions (buttons, links, etc.)
  *   - Bypasses common blocking methods
  *   - Defeats basic webdriver detection
  *
@@ -52,37 +54,38 @@
         }, true);
     });
 
-    // Re-enable context menu (right-click) - Multiple approaches
-    ['contextmenu', 'mousedown', 'mouseup', 'click', 'dblclick'].forEach(eventType => {
+    // Re-enable context menu (right-click) - Targeted approach
+    document.addEventListener('contextmenu', function(e) {
+        e.stopImmediatePropagation();
+    }, true);
+
+    // Re-enable text selection (excluding mouse events that break interactions)
+    ['selectstart', 'dragstart'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
-            if (e.type === 'contextmenu' || e.button === 2) {
-                e.stopImmediatePropagation();
-                e.stopPropagation();
-                e.preventDefault();
-                return false;
-            } else {
-                e.stopImmediatePropagation();
-            }
+            e.stopImmediatePropagation();
         }, true);
     });
 
-    // Override existing context menu handlers
-    const originalAddEventListener = EventTarget.prototype.addEventListener;
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-        if (type === 'contextmenu') {
-            return; // Don't allow new contextmenu listeners
-        }
-        return originalAddEventListener.call(this, type, listener, options);
-    };
-
-    // Additional protection against common blocking patterns
-    ['oncontextmenu', 'onselectstart', 'ondragstart'].forEach(prop => {
+    // Prevent page from disabling text selection/context menu
+    ['onselectstart', 'ondragstart', 'oncontextmenu'].forEach(prop => {
         Object.defineProperty(document, prop, {
             get: () => null,
             set: () => {},
             configurable: true
         });
     });
+
+    // Override user-select CSS property globally
+    const style = document.createElement('style');
+    style.textContent = `
+        * {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+        }
+    `;
+    document.head.appendChild(style);
 
     // Bypass webdriver detection
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
