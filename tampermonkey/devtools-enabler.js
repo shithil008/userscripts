@@ -26,6 +26,25 @@
 
     const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
+    // Override Event.prototype.preventDefault for copy/paste/cut events
+    const originalPreventDefault = Event.prototype.preventDefault;
+    Event.prototype.preventDefault = function() {
+        // Allow copy/paste/cut/contextmenu/selectstart to work despite preventDefault calls
+        if (['copy', 'cut', 'paste', 'contextmenu', 'selectstart'].includes(this.type)) {
+            return;
+        }
+        return originalPreventDefault.apply(this, arguments);
+    };
+
+    // Override Event.prototype.stopPropagation for selection events
+    const originalStopPropagation = Event.prototype.stopPropagation;
+    Event.prototype.stopPropagation = function() {
+        if (['selectstart', 'copy', 'cut', 'paste'].includes(this.type)) {
+            return;
+        }
+        return originalStopPropagation.apply(this, arguments);
+    };
+
     // Handle keyboard shortcuts
     ['keydown', 'keypress', 'keyup'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
@@ -52,49 +71,90 @@
                 e.stopImmediatePropagation();
                 return;
             }
+
+            // Allow copy (Ctrl/Cmd+C)
+            if ((e.ctrlKey || e.metaKey) && e.keyCode === 67) {
+                e.stopImmediatePropagation();
+                return;
+            }
+
+            // Allow paste (Ctrl/Cmd+V)
+            if ((e.ctrlKey || e.metaKey) && e.keyCode === 86) {
+                e.stopImmediatePropagation();
+                return;
+            }
+
+            // Allow cut (Ctrl/Cmd+X)
+            if ((e.ctrlKey || e.metaKey) && e.keyCode === 88) {
+                e.stopImmediatePropagation();
+                return;
+            }
+
+            // Allow select all (Ctrl/Cmd+A)
+            if ((e.ctrlKey || e.metaKey) && e.keyCode === 65) {
+                e.stopImmediatePropagation();
+                return;
+            }
         }, true);
     });
 
-    // Re-enable context menu (right-click)
-    document.addEventListener('contextmenu', function(e) {
-        e.stopImmediatePropagation();
-    }, true);
-
-    // Re-enable copy/paste/cut operations
-    ['copy', 'paste', 'cut'].forEach(eventType => {
-        document.addEventListener(eventType, function(e) {
-            e.stopImmediatePropagation();
-        }, true);
-    });
-
-    // Re-enable text selection
-    ['selectstart', 'mousedown'].forEach(eventType => {
-        document.addEventListener(eventType, function(e) {
-            e.stopImmediatePropagation();
-        }, true);
-    });
-
-    // Store original methods for later use
-    const originalAddEventListener = EventTarget.prototype.addEventListener;
-    
-    // Override addEventListener to block registration of blocking listeners
-    const blockEvents = ['selectstart', 'dragstart', 'cut', 'copy', 'paste', 'contextmenu'];
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-        if (blockEvents.includes(type)) {
-            // Ignore attempts to add blocking listeners
-            return;
-        }
-        return originalAddEventListener.call(this, type, listener, options);
+    // Clear any inline event handlers that block functionality
+    const clearBlockingHandlers = (element) => {
+        if (!element) return;
+        ['oncopy', 'oncut', 'onpaste', 'oncontextmenu', 'onselectstart', 'ondragstart'].forEach(prop => {
+            if (element[prop]) {
+                element[prop] = null;
+            }
+        });
     };
 
-    // Prevent page from disabling text selection/context menu/copy-paste
+    // Clear handlers on document and body
+    clearBlockingHandlers(document);
+    clearBlockingHandlers(document.body);
+    clearBlockingHandlers(document.documentElement);
+
+    // Prevent page from setting blocking handlers
     ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'].forEach(prop => {
         Object.defineProperty(document, prop, {
             get: () => null,
             set: () => {},
             configurable: true
         });
+        Object.defineProperty(document.body || {}, prop, {
+            get: () => null,
+            set: () => {},
+            configurable: true
+        });
     });
+
+    // Override addEventListener to neutralize blocking listeners
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        // For blocking events, wrap the listener to prevent it from blocking
+        if (['copy', 'cut', 'paste', 'selectstart', 'contextmenu'].includes(type)) {
+            const wrappedListener = function(e) {
+                // Temporarily disable preventDefault and stopPropagation
+                const origPD = e.preventDefault;
+                const origSP = e.stopPropagation;
+                const origSIP = e.stopImmediatePropagation;
+                
+                e.preventDefault = () => {};
+                e.stopPropagation = () => {};
+                e.stopImmediatePropagation = () => {};
+                
+                try {
+                    listener.call(this, e);
+                } finally {
+                    // Restore original methods
+                    e.preventDefault = origPD;
+                    e.stopPropagation = origSP;
+                    e.stopImmediatePropagation = origSIP;
+                }
+            };
+            return originalAddEventListener.call(this, type, wrappedListener, options);
+        }
+        return originalAddEventListener.call(this, type, listener, options);
+    };
 
     // Override user-select CSS property globally
     const style = document.createElement('style');
@@ -114,27 +174,39 @@
     `;
     (document.head || document.documentElement).appendChild(style);
 
-    // Enable copy/paste on input fields specifically
-    const enableInputs = () => {
-        document.querySelectorAll('input, textarea').forEach(input => {
-            ['oncopy', 'onpaste', 'oncut', 'oncontextmenu', 'onselectstart'].forEach(prop => {
-                if (input[prop]) {
-                    input[prop] = null;
-                }
-            });
-            // Remove readonly/disabled attributes that might be used to block paste
-            if (input.hasAttribute('oncopy') || input.hasAttribute('onpaste')) {
-                input.removeAttribute('oncopy');
-                input.removeAttribute('onpaste');
-                input.removeAttribute('oncut');
-            }
+    // Enable copy/paste on input fields and all elements
+    const enableElements = () => {
+        document.querySelectorAll('*').forEach(el => {
+            clearBlockingHandlers(el);
+            // Remove blocking attributes
+            if (el.hasAttribute('oncopy')) el.removeAttribute('oncopy');
+            if (el.hasAttribute('onpaste')) el.removeAttribute('onpaste');
+            if (el.hasAttribute('oncut')) el.removeAttribute('oncut');
+            if (el.hasAttribute('onselectstart')) el.removeAttribute('onselectstart');
+            if (el.hasAttribute('oncontextmenu')) el.removeAttribute('oncontextmenu');
+            if (el.hasAttribute('ondragstart')) el.removeAttribute('ondragstart');
         });
     };
 
-    // Run immediately and observe for dynamically added inputs
-    enableInputs();
+    // Run on page load and observe for changes
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', enableElements);
+    } else {
+        enableElements();
+    }
+
+    // Watch for dynamic content
     if (typeof MutationObserver !== 'undefined') {
-        const observer = new MutationObserver(enableInputs);
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        clearBlockingHandlers(node);
+                        node.querySelectorAll && node.querySelectorAll('*').forEach(clearBlockingHandlers);
+                    }
+                });
+            });
+        });
         observer.observe(document.documentElement || document.body, { 
             childList: true, 
             subtree: true 
