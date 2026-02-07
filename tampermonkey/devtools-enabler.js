@@ -10,6 +10,7 @@
  *   - Re-enables Cmd/Ctrl+U (View Page Source) - macOS/Windows/Linux
  *   - Re-enables right-click context menu
  *   - Enables text selection (including double-click selection)
+ *   - Enables copy/paste in input fields
  *   - Preserves normal element interactions (buttons, links, etc.)
  *   - Bypasses common blocking methods
  *   - Defeats basic webdriver detection
@@ -59,15 +60,15 @@
         e.stopImmediatePropagation();
     }, true);
 
-    // Re-enable text selection (excluding mouse events that break interactions)
-    ['selectstart', 'dragstart'].forEach(eventType => {
+    // Re-enable text selection and copy/paste
+    ['selectstart', 'dragstart', 'cut', 'copy', 'paste'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
             e.stopImmediatePropagation();
         }, true);
     });
 
     // Prevent page from disabling text selection/context menu
-    ['onselectstart', 'ondragstart', 'oncontextmenu'].forEach(prop => {
+    ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'].forEach(prop => {
         Object.defineProperty(document, prop, {
             get: () => null,
             set: () => {},
