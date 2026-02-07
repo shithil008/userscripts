@@ -55,52 +55,39 @@
         }, true);
     });
 
-    // Re-enable context menu (right-click) - Targeted approach
+    // Re-enable context menu (right-click)
     document.addEventListener('contextmenu', function(e) {
         e.stopImmediatePropagation();
     }, true);
 
-    // Remove existing blocking listeners and prevent new ones
-    const blockEvents = ['selectstart', 'dragstart', 'cut', 'copy', 'paste', 'contextmenu', 'mousedown', 'mouseup'];
-    
-    // Temporarily store original methods
-    const originalAddEventListener = EventTarget.prototype.addEventListener;
-    const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
+    // Re-enable copy/paste/cut operations
+    ['copy', 'paste', 'cut'].forEach(eventType => {
+        document.addEventListener(eventType, function(e) {
+            e.stopImmediatePropagation();
+        }, true);
+    });
 
-    // Override addEventListener to block registration of known blockers
+    // Re-enable text selection
+    ['selectstart', 'mousedown'].forEach(eventType => {
+        document.addEventListener(eventType, function(e) {
+            e.stopImmediatePropagation();
+        }, true);
+    });
+
+    // Store original methods for later use
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    
+    // Override addEventListener to block registration of blocking listeners
+    const blockEvents = ['selectstart', 'dragstart', 'cut', 'copy', 'paste', 'contextmenu'];
     EventTarget.prototype.addEventListener = function(type, listener, options) {
         if (blockEvents.includes(type)) {
-            // Don't register blocking listeners
+            // Ignore attempts to add blocking listeners
             return;
         }
         return originalAddEventListener.call(this, type, listener, options);
     };
 
-    // Remove any existing blocking listeners
-    const cleanupBlockers = () => {
-        blockEvents.forEach(eventType => {
-            // Remove any existing listeners by replacing the method temporarily
-            const elements = [document, document.body, document.documentElement];
-            elements.forEach(el => {
-                if (el && el.nodeType === 1) {
-                    // Force removal by replacing the event handler
-                    if (typeof el['on' + eventType] === 'function') {
-                        el['on' + eventType] = null;
-                    }
-                }
-            });
-        });
-    };
-
-    // Run cleanup immediately and after DOM is ready
-    cleanupBlockers();
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', cleanupBlockers);
-    } else {
-        setTimeout(cleanupBlockers, 0);
-    }
-
-    // Prevent page from disabling text selection/context menu
+    // Prevent page from disabling text selection/context menu/copy-paste
     ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'].forEach(prop => {
         Object.defineProperty(document, prop, {
             get: () => null,
@@ -118,8 +105,41 @@
             -ms-user-select: text !important;
             user-select: text !important;
         }
+        input, textarea {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+        }
     `;
-    document.head.appendChild(style);
+    (document.head || document.documentElement).appendChild(style);
+
+    // Enable copy/paste on input fields specifically
+    const enableInputs = () => {
+        document.querySelectorAll('input, textarea').forEach(input => {
+            ['oncopy', 'onpaste', 'oncut', 'oncontextmenu', 'onselectstart'].forEach(prop => {
+                if (input[prop]) {
+                    input[prop] = null;
+                }
+            });
+            // Remove readonly/disabled attributes that might be used to block paste
+            if (input.hasAttribute('oncopy') || input.hasAttribute('onpaste')) {
+                input.removeAttribute('oncopy');
+                input.removeAttribute('onpaste');
+                input.removeAttribute('oncut');
+            }
+        });
+    };
+
+    // Run immediately and observe for dynamically added inputs
+    enableInputs();
+    if (typeof MutationObserver !== 'undefined') {
+        const observer = new MutationObserver(enableInputs);
+        observer.observe(document.documentElement || document.body, { 
+            childList: true, 
+            subtree: true 
+        });
+    }
 
     // Bypass webdriver detection
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
