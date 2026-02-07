@@ -60,17 +60,45 @@
         e.stopImmediatePropagation();
     }, true);
 
-    // Remove all existing event listeners that block functionality
-    const blockEvents = ['selectstart', 'dragstart', 'cut', 'copy', 'paste', 'contextmenu'];
+    // Remove existing blocking listeners and prevent new ones
+    const blockEvents = ['selectstart', 'dragstart', 'cut', 'copy', 'paste', 'contextmenu', 'mousedown', 'mouseup'];
+    
+    // Temporarily store original methods
     const originalAddEventListener = EventTarget.prototype.addEventListener;
+    const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
 
+    // Override addEventListener to block registration of known blockers
     EventTarget.prototype.addEventListener = function(type, listener, options) {
         if (blockEvents.includes(type)) {
-            // Don't add blocking listeners
+            // Don't register blocking listeners
             return;
         }
         return originalAddEventListener.call(this, type, listener, options);
     };
+
+    // Remove any existing blocking listeners
+    const cleanupBlockers = () => {
+        blockEvents.forEach(eventType => {
+            // Remove any existing listeners by replacing the method temporarily
+            const elements = [document, document.body, document.documentElement];
+            elements.forEach(el => {
+                if (el && el.nodeType === 1) {
+                    // Force removal by replacing the event handler
+                    if (typeof el['on' + eventType] === 'function') {
+                        el['on' + eventType] = null;
+                    }
+                }
+            });
+        });
+    };
+
+    // Run cleanup immediately and after DOM is ready
+    cleanupBlockers();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', cleanupBlockers);
+    } else {
+        setTimeout(cleanupBlockers, 0);
+    }
 
     // Prevent page from disabling text selection/context menu
     ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'].forEach(prop => {
