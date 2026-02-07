@@ -52,12 +52,28 @@
         }, true);
     });
 
-    // Re-enable context menu (right-click)
-    ['contextmenu', 'selectstart', 'cut', 'copy', 'paste'].forEach(eventType => {
+    // Re-enable context menu (right-click) - Multiple approaches
+    ['contextmenu', 'mousedown', 'mouseup', 'click', 'dblclick'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
-            e.stopImmediatePropagation();
+            if (e.type === 'contextmenu' || e.button === 2) {
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                e.preventDefault();
+                return false;
+            } else {
+                e.stopImmediatePropagation();
+            }
         }, true);
     });
+
+    // Override existing context menu handlers
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'contextmenu') {
+            return; // Don't allow new contextmenu listeners
+        }
+        return originalAddEventListener.call(this, type, listener, options);
+    };
 
     // Additional protection against common blocking patterns
     ['oncontextmenu', 'onselectstart', 'ondragstart'].forEach(prop => {
