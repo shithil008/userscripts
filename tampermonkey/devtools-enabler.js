@@ -16,8 +16,7 @@
  *   - Defeats basic webdriver detection
  *
  * Installation:
- *   Tampermonkey: Add @require directive pointing to this file OR
- *   Add // @run-at document-start to your userscript
+ *   Tampermonkey: Add // @run-at document-start to your userscript
  *   Direct usage: Include script tag before other scripts
  *
  * Note: Only effective against client-side blocking methods
@@ -25,248 +24,189 @@
 (function() {
     'use strict';
 
-    const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+    console.log('[Copy/Paste Enabler] Script loaded');
 
-    // The KEY: Override Event.prototype methods to prevent sites from blocking
-    // This must happen BEFORE any site code runs
-    const originalPreventDefault = Event.prototype.preventDefault;
-    const originalStopPropagation = Event.prototype.stopPropagation;
-    const originalStopImmediatePropagation = Event.prototype.stopImmediatePropagation;
+    // Store original functions before any page code runs
+    const EventTarget_addEventListener = EventTarget.prototype.addEventListener;
+    const document_addEventListener = document.addEventListener;
+    const Event_preventDefault = Event.prototype.preventDefault;
 
-    // Only protect specific events - not keyboard/mouse events as those are too general
-    const protectedEvents = ['copy', 'cut', 'paste', 'selectstart', 'contextmenu'];
+    // Neutered functions - do nothing
+    const noop = function() {};
+    const returnTrue = function() { return true; };
 
-    // Override preventDefault - when sites call e.preventDefault() on protected events, ignore it
-    Event.prototype.preventDefault = function() {
-        if (protectedEvents.includes(this.type)) {
-            // Silently ignore - let the event's default action happen
-            console.log('[Copy/Paste Enabler] Blocked preventDefault on:', this.type);
-            return;
+    // Events we want to enable
+    const enableEvents = [
+        'contextmenu', 'copy', 'cut', 'paste',
+        'selectstart', 'select', 'dragstart'
+    ];
+
+    // Keyboard events to protect
+    const protectKeys = ['keydown', 'keyup', 'keypress'];
+
+    // Override addEventListener to neuter blocking listeners
+    const newAddEventListener = function(type, listener, options) {
+        if (enableEvents.includes(type)) {
+            // Replace blocking listener with a noop
+            console.log('[Copy/Paste Enabler] Blocked addEventListener for:', type);
+            return EventTarget_addEventListener.call(this, type, returnTrue, options);
         }
-        return originalPreventDefault.apply(this, arguments);
-    };
-
-    // Override stopPropagation - let protected events propagate freely
-    Event.prototype.stopPropagation = function() {
-        if (protectedEvents.includes(this.type)) {
-            console.log('[Copy/Paste Enabler] Blocked stopPropagation on:', this.type);
-            return;
-        }
-        return originalStopPropagation.apply(this, arguments);
-    };
-
-    // Override stopImmediatePropagation - let protected events propagate freely
-    Event.prototype.stopImmediatePropagation = function() {
-        if (protectedEvents.includes(this.type)) {
-            console.log('[Copy/Paste Enabler] Blocked stopImmediatePropagation on:', this.type);
-            return;
-        }
-        return originalStopImmediatePropagation.apply(this, arguments);
-    };
-
-    // Make sure sites can't detect we've overridden these
-    Object.defineProperty(Event.prototype.preventDefault, 'toString', {
-        value: originalPreventDefault.toString.bind(originalPreventDefault),
-        writable: false,
-        configurable: false
-    });
-
-    // Also override the return value property
-    const originalReturnValue = Object.getOwnPropertyDescriptor(Event.prototype, 'returnValue');
-    if (originalReturnValue) {
-        Object.defineProperty(Event.prototype, 'returnValue', {
-            get: function() {
-                if (protectedEvents.includes(this.type)) {
-                    return true; // Always indicate event is not prevented
-                }
-                return originalReturnValue.get ? originalReturnValue.get.call(this) : true;
-            },
-            set: function(val) {
-                if (protectedEvents.includes(this.type)) {
-                    // Ignore attempts to set returnValue to false
-                    return;
-                }
-                if (originalReturnValue.set) {
-                    originalReturnValue.set.call(this, val);
-                }
-            }
-        });
-    }
-
-    // Handle keyboard shortcuts - protect DevTools shortcuts only
-    ['keydown'].forEach(eventType => {
-        document.addEventListener(eventType, function(e) {
-            const ctrl = e.ctrlKey || e.metaKey;
-            
-            // Only protect DevTools shortcuts, let copy/paste shortcuts work normally
-            const isDevToolsShortcut = 
-                (e.keyCode === 123) || // F12
-                (ctrl && (e.shiftKey || e.altKey) && e.keyCode === 73) || // Inspect
-                (ctrl && (e.shiftKey || e.altKey) && e.keyCode === 74) || // Console
-                (ctrl && e.keyCode === 85); // View Source
-            
-            if (isDevToolsShortcut) {
-                // Stop site code from blocking DevTools
-                originalStopImmediatePropagation.call(e);
-                console.log('[Copy/Paste Enabler] Protected DevTools shortcut');
-            }
-            
-            // For copy/paste shortcuts, don't stop propagation - let the event flow
-            // The Event.prototype overrides will prevent blocking
-        }, true);
-    });
-
-    // Clear any inline event handlers that block functionality
-    const clearBlockingHandlers = (element) => {
-        if (!element || !element.nodeType) return;
         
-        ['oncopy', 'oncut', 'onpaste', 'oncontextmenu', 'onselectstart', 'ondragstart', 
-         'onmousedown', 'onmouseup', 'onkeydown', 'onkeypress', 'onkeyup'].forEach(prop => {
+        if (protectKeys.includes(type)) {
+            // Wrap keyboard listener to prevent it from blocking shortcuts
+            const wrappedListener = function(e) {
+                const ctrl = e.ctrlKey || e.metaKey;
+                const isShortcut = 
+                    e.keyCode === 123 || // F12
+                    (ctrl && e.keyCode === 67) || // Ctrl+C
+                    (ctrl && e.keyCode === 86) || // Ctrl+V
+                    (ctrl && e.keyCode === 88) || // Ctrl+X
+                    (ctrl && e.keyCode === 65) || // Ctrl+A
+                    (ctrl && e.keyCode === 85) || // Ctrl+U
+                    (ctrl && (e.shiftKey || e.altKey) && [73, 74].includes(e.keyCode));
+                
+                if (isShortcut) {
+                    console.log('[Copy/Paste Enabler] Protected keyboard shortcut:', e.keyCode);
+                    return true;
+                }
+                
+                return listener.call(this, e);
+            };
+            return EventTarget_addEventListener.call(this, type, wrappedListener, options);
+        }
+        
+        return EventTarget_addEventListener.call(this, type, listener, options);
+    };
+
+    // Replace addEventListener globally
+    EventTarget.prototype.addEventListener = newAddEventListener;
+    document.addEventListener = newAddEventListener;
+
+    // Remove all on* property setters (oncopy, onpaste, etc.)
+    const blockProperties = function(obj) {
+        if (!obj) return;
+        
+        ['oncopy', 'oncut', 'onpaste', 'oncontextmenu', 'onselectstart', 
+         'ondragstart', 'onselect', 'onmousedown', 'onmouseup', 'onkeydown', 
+         'onkeyup', 'onkeypress'].forEach(prop => {
             try {
-                if (element[prop]) {
-                    element[prop] = null;
-                }
-                // Also remove HTML attributes
-                if (element.hasAttribute && element.hasAttribute(prop)) {
-                    element.removeAttribute(prop);
-                }
+                Object.defineProperty(obj, prop, {
+                    get: () => null,
+                    set: noop,
+                    configurable: false
+                });
             } catch(e) {}
         });
     };
 
-    // Clear all blocking handlers from the page
-    const clearAllBlockingHandlers = () => {
-        const elements = [document, document.documentElement, document.body];
-        elements.forEach(el => {
-            if (el) clearBlockingHandlers(el);
-        });
-        
-        // Clear from all elements
-        try {
-            document.querySelectorAll('*').forEach(clearBlockingHandlers);
-        } catch(e) {}
-    };
+    // Block properties immediately
+    blockProperties(document);
+    blockProperties(window);
+    blockProperties(HTMLElement.prototype);
 
-    // Prevent page from setting new blocking handlers
-    const blockingProps = ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 
-                           'onpaste', 'onmousedown', 'onmouseup', 'onkeydown', 'onkeyup'];
-    
-    const protectElement = (target) => {
-        if (!target) return;
-        blockingProps.forEach(prop => {
-            try {
-                Object.defineProperty(target, prop, {
-                    get: () => null,
-                    set: () => {},
-                    configurable: false,
-                    enumerable: true
-                });
-            } catch(e) {
-                // If can't redefine, at least clear it
-                try { target[prop] = null; } catch(e2) {}
-            }
-        });
-    };
-    
-    // Protect critical elements
-    const protectDOM = () => {
-        protectElement(document);
-        protectElement(window);
-        if (document.body) protectElement(document.body);
-        if (document.documentElement) protectElement(document.documentElement);
-    };
+    // Inject aggressive CSS
+    const style = document.createElement('style');
+    style.id = 'copy-paste-enabler';
+    style.textContent = `
+        * {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+            -webkit-user-drag: auto !important;
+        }
+        html, body {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            user-select: text !important;
+        }
+    `;
 
-    // Inject CSS to enable text selection
-    const injectStyles = () => {
-        if (document.getElementById('copy-paste-enabler-style')) return;
-        
-        const style = document.createElement('style');
-        style.id = 'copy-paste-enabler-style';
-        style.textContent = `
-            *, *::before, *::after {
-                -webkit-user-select: text !important;
-                -moz-user-select: text !important;
-                -ms-user-select: text !important;
-                user-select: text !important;
-                -webkit-touch-callout: default !important;
-            }
-            input, textarea, [contenteditable] {
-                -webkit-user-select: text !important;
-                -moz-user-select: text !important;
-                -ms-user-select: text !important;
-                user-select: text !important;
-                pointer-events: auto !important;
-            }
-            body {
-                -webkit-user-select: text !important;
-                -moz-user-select: text !important;
-                -ms-user-select: text !important;
-                user-select: text !important;
-            }
-        `;
-        
-        // Try multiple injection points
-        const insertTarget = document.head || document.documentElement || document.body;
-        if (insertTarget) {
-            insertTarget.appendChild(style);
+    const injectCSS = () => {
+        const target = document.head || document.documentElement || document.body;
+        if (target && !document.getElementById('copy-paste-enabler')) {
+            target.insertBefore(style, target.firstChild);
+            console.log('[Copy/Paste Enabler] CSS injected');
         }
     };
 
-    // Run immediately
-    clearAllBlockingHandlers();
-    protectDOM();
-    
-    // Keep clearing handlers periodically for aggressive sites
-    setInterval(clearAllBlockingHandlers, 500);
-    
-    // Inject styles as early as possible and keep re-injecting
-    injectStyles();
-    setTimeout(injectStyles, 0);
-    setInterval(injectStyles, 1000);
-    
-    // Run cleanup after DOM loads
-    const runAfterLoad = () => {
-        injectStyles();
-        clearAllBlockingHandlers();
-        protectDOM();
+    // Inject immediately and keep trying
+    injectCSS();
+    const cssInterval = setInterval(() => {
+        if (document.head) {
+            injectCSS();
+            clearInterval(cssInterval);
+        }
+    }, 10);
+
+    // Clean up inline handlers from DOM
+    const cleanElement = (el) => {
+        if (!el || el.nodeType !== 1) return;
+        ['oncopy', 'oncut', 'onpaste', 'oncontextmenu', 'onselectstart', 'ondragstart'].forEach(attr => {
+            if (el.hasAttribute(attr)) {
+                el.removeAttribute(attr);
+            }
+            if (el[attr]) {
+                el[attr] = null;
+            }
+        });
     };
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', runAfterLoad);
-    } else {
-        setTimeout(runAfterLoad, 0);
-    }
-    
-    // Also run on full page load
-    window.addEventListener('load', runAfterLoad);
+    // Clean existing elements
+    const cleanAll = () => {
+        [document, document.documentElement, document.body].forEach(cleanElement);
+        try {
+            document.querySelectorAll('*').forEach(cleanElement);
+        } catch(e) {}
+    };
 
-    // Watch for dynamic content and clear blocking handlers
+    // Run cleanup
+    cleanAll();
+    setTimeout(cleanAll, 100);
+    setTimeout(cleanAll, 500);
+
+    // Watch for new elements
     if (typeof MutationObserver !== 'undefined') {
         const observer = new MutationObserver((mutations) => {
-            mutations.forEach(mutation => {
-                mutation.addedNodes.forEach(node => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
                     if (node.nodeType === 1) {
-                        clearBlockingHandlers(node);
-                        if (node.querySelectorAll) {
-                            node.querySelectorAll('*').forEach(clearBlockingHandlers);
-                        }
+                        cleanElement(node);
                     }
                 });
             });
         });
         
-        // Start observing when possible
-        const startObserving = () => {
+        const observe = () => {
             const target = document.documentElement || document.body;
             if (target) {
                 observer.observe(target, { childList: true, subtree: true });
             } else {
-                setTimeout(startObserving, 10);
+                setTimeout(observe, 10);
             }
         };
-        startObserving();
+        observe();
+    }
+
+    // DOM ready tasks
+    const onReady = () => {
+        blockProperties(document.body);
+        blockProperties(document.documentElement);
+        cleanAll();
+        injectCSS();
+        console.log('[Copy/Paste Enabler] DOM ready, protections applied');
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onReady);
+    } else {
+        onReady();
     }
 
     // Bypass webdriver detection
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    try {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    } catch(e) {}
+
+    console.log('[Copy/Paste Enabler] Setup complete');
 })();
