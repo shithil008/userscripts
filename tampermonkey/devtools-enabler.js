@@ -60,21 +60,17 @@
         e.stopImmediatePropagation();
     }, true);
 
-    // Re-enable text selection and copy/paste - Comprehensive approach
-    ['selectstart', 'dragstart', 'cut', 'copy', 'paste'].forEach(eventType => {
-        document.addEventListener(eventType, function(e) {
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-            e.preventDefault(); // Allow default behavior
-            
-            // Trigger native clipboard events after prevention
-            if (e.type === 'copy' || e.type === 'cut' || e.type === 'paste') {
-                setTimeout(() => {
-                    document.dispatchEvent(new Event(e.type, { bubbles: true }));
-                }, 0);
-            }
-        }, true);
-    });
+    // Remove all existing event listeners that block functionality
+    const blockEvents = ['selectstart', 'dragstart', 'cut', 'copy', 'paste', 'contextmenu'];
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (blockEvents.includes(type)) {
+            // Don't add blocking listeners
+            return;
+        }
+        return originalAddEventListener.call(this, type, listener, options);
+    };
 
     // Prevent page from disabling text selection/context menu
     ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'].forEach(prop => {
