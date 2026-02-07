@@ -1,6 +1,6 @@
 /**
- * DevTools Shortcut Enabler
- * Re-enables blocked developer tools shortcuts (F12, Cmd/Ctrl+Shift+I/J/U)
+ * DevTools & Context Menu Enabler
+ * Re-enables blocked developer tools shortcuts and context menus
  * Can be loaded via Tampermonkey @require or directly included
  *
  * Features:
@@ -8,6 +8,7 @@
  *   - Re-enables Cmd/Ctrl+Option/Shift+I (Inspect Element) - macOS/Windows/Linux
  *   - Re-enables Cmd/Ctrl+Option/Shift+J (Open Console) - macOS/Windows/Linux
  *   - Re-enables Cmd/Ctrl+U (View Page Source) - macOS/Windows/Linux
+ *   - Re-enables right-click context menu
  *   - Bypasses common blocking methods
  *   - Defeats basic webdriver detection
  *
@@ -20,10 +21,10 @@
 (function() {
     'use strict';
 
-    const blockKeys = ['keydown', 'keypress', 'keyup'];
     const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
-    blockKeys.forEach(eventType => {
+    // Handle keyboard shortcuts
+    ['keydown', 'keypress', 'keyup'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
             // Allow F12 (Developer Tools) - All OS
             if (e.keyCode === 123 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
@@ -32,26 +33,39 @@
             }
 
             // Allow Inspect Element shortcuts - All OS
-            // Windows/Linux: Ctrl+Shift+I | macOS: Cmd+Option+I
             if ((e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && e.keyCode === 73) {
                 e.stopImmediatePropagation();
                 return;
             }
 
             // Allow Console shortcuts - All OS
-            // Windows/Linux: Ctrl+Shift+J | macOS: Cmd+Option+J
             if ((e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && e.keyCode === 74) {
                 e.stopImmediatePropagation();
                 return;
             }
 
             // Allow View Source shortcuts - All OS
-            // Windows/Linux: Ctrl+U | macOS: Cmd+U
             if ((e.ctrlKey || e.metaKey) && e.keyCode === 85) {
                 e.stopImmediatePropagation();
                 return;
             }
         }, true);
+    });
+
+    // Re-enable context menu (right-click)
+    ['contextmenu', 'selectstart', 'cut', 'copy', 'paste'].forEach(eventType => {
+        document.addEventListener(eventType, function(e) {
+            e.stopImmediatePropagation();
+        }, true);
+    });
+
+    // Additional protection against common blocking patterns
+    ['oncontextmenu', 'onselectstart', 'ondragstart'].forEach(prop => {
+        Object.defineProperty(document, prop, {
+            get: () => null,
+            set: () => {},
+            configurable: true
+        });
     });
 
     // Bypass webdriver detection
