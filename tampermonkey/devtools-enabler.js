@@ -16,7 +16,8 @@
  *   - Defeats basic webdriver detection
  *
  * Installation:
- *   Tampermonkey: Add @require directive pointing to this file
+ *   Tampermonkey: Add @require directive pointing to this file OR
+ *   Add // @run-at document-start to your userscript
  *   Direct usage: Include script tag before other scripts
  *
  * Note: Only effective against client-side blocking methods
@@ -26,24 +27,24 @@
 
     const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
-    // Override Event.prototype.preventDefault for copy/paste/cut events
-    const originalPreventDefault = Event.prototype.preventDefault;
-    Event.prototype.preventDefault = function() {
-        // Allow copy/paste/cut/contextmenu/selectstart to work despite preventDefault calls
-        if (['copy', 'cut', 'paste', 'contextmenu', 'selectstart'].includes(this.type)) {
-            return;
-        }
-        return originalPreventDefault.apply(this, arguments);
-    };
+    // Aggressive event protection - intercept in capture phase and stop propagation
+    // This prevents the site's blocking code from ever running
+    const protectedEvents = ['copy', 'cut', 'paste', 'selectstart', 'contextmenu', 'dragstart'];
+    
+    protectedEvents.forEach(eventType => {
+        document.addEventListener(eventType, function(e) {
+            // Stop the event from reaching the site's blocking listeners
+            e.stopImmediatePropagation();
+            // Don't prevent default - let browser handle copy/paste/context menu normally
+        }, true); // Capture phase - runs first!
+    });
 
-    // Override Event.prototype.stopPropagation for selection events
-    const originalStopPropagation = Event.prototype.stopPropagation;
-    Event.prototype.stopPropagation = function() {
-        if (['selectstart', 'copy', 'cut', 'paste'].includes(this.type)) {
-            return;
-        }
-        return originalStopPropagation.apply(this, arguments);
-    };
+    // Also intercept on window for redundancy
+    protectedEvents.forEach(eventType => {
+        window.addEventListener(eventType, function(e) {
+            e.stopImmediatePropagation();
+        }, true);
+    });
 
     // Handle keyboard shortcuts
     ['keydown', 'keypress', 'keyup'].forEach(eventType => {
@@ -108,109 +109,102 @@
         });
     };
 
-    // Clear handlers on document and body
-    clearBlockingHandlers(document);
-    clearBlockingHandlers(document.body);
-    clearBlockingHandlers(document.documentElement);
-
-    // Prevent page from setting blocking handlers
-    ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'].forEach(prop => {
-        Object.defineProperty(document, prop, {
-            get: () => null,
-            set: () => {},
-            configurable: true
+    // Clear any inline event handlers that block functionality
+    const clearAllBlockingHandlers = () => {
+        const elements = [document, document.documentElement, document.body];
+        elements.forEach(el => {
+            if (el) clearBlockingHandlers(el);
         });
-        Object.defineProperty(document.body || {}, prop, {
-            get: () => null,
-            set: () => {},
-            configurable: true
+        
+        // Clear from all elements
+        document.querySelectorAll('*').forEach(clearBlockingHandlers);
+    };
+
+    // Run immediately
+    clearAllBlockingHandlers();
+
+    // Prevent page from setting new blocking handlers on document/body
+    const blockingProps = ['onselectstart', 'ondragstart', 'oncontextmenu', 'oncut', 'oncopy', 'onpaste'];
+    
+    [document, document.documentElement, document.body].forEach(target => {
+        if (!target) return;
+        blockingProps.forEach(prop => {
+            try {
+                Object.defineProperty(target, prop, {
+                    get: () => null,
+                    set: () => {},
+                    configurable: false
+                });
+            } catch(e) {}
         });
     });
 
-    // Override addEventListener to neutralize blocking listeners
-    const originalAddEventListener = EventTarget.prototype.addEventListener;
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-        // For blocking events, wrap the listener to prevent it from blocking
-        if (['copy', 'cut', 'paste', 'selectstart', 'contextmenu'].includes(type)) {
-            const wrappedListener = function(e) {
-                // Temporarily disable preventDefault and stopPropagation
-                const origPD = e.preventDefault;
-                const origSP = e.stopPropagation;
-                const origSIP = e.stopImmediatePropagation;
-                
-                e.preventDefault = () => {};
-                e.stopPropagation = () => {};
-                e.stopImmediatePropagation = () => {};
-                
-                try {
-                    listener.call(this, e);
-                } finally {
-                    // Restore original methods
-                    e.preventDefault = origPD;
-                    e.stopPropagation = origSP;
-                    e.stopImmediatePropagation = origSIP;
-                }
-            };
-            return originalAddEventListener.call(this, type, wrappedListener, options);
-        }
-        return originalAddEventListener.call(this, type, listener, options);
-    };
-
     // Override user-select CSS property globally
-    const style = document.createElement('style');
-    style.textContent = `
-        * {
-            -webkit-user-select: text !important;
-            -moz-user-select: text !important;
-            -ms-user-select: text !important;
-            user-select: text !important;
-        }
-        input, textarea {
-            -webkit-user-select: text !important;
-            -moz-user-select: text !important;
-            -ms-user-select: text !important;
-            user-select: text !important;
-        }
-    `;
-    (document.head || document.documentElement).appendChild(style);
-
-    // Enable copy/paste on input fields and all elements
-    const enableElements = () => {
-        document.querySelectorAll('*').forEach(el => {
-            clearBlockingHandlers(el);
-            // Remove blocking attributes
-            if (el.hasAttribute('oncopy')) el.removeAttribute('oncopy');
-            if (el.hasAttribute('onpaste')) el.removeAttribute('onpaste');
-            if (el.hasAttribute('oncut')) el.removeAttribute('oncut');
-            if (el.hasAttribute('onselectstart')) el.removeAttribute('onselectstart');
-            if (el.hasAttribute('oncontextmenu')) el.removeAttribute('oncontextmenu');
-            if (el.hasAttribute('ondragstart')) el.removeAttribute('ondragstart');
-        });
+    const injectStyles = () => {
+        const style = document.createElement('style');
+        style.id = 'copy-paste-enabler-style';
+        style.textContent = `
+            * {
+                -webkit-user-select: text !important;
+                -moz-user-select: text !important;
+                -ms-user-select: text !important;
+                user-select: text !important;
+            }
+            input, textarea {
+                -webkit-user-select: text !important;
+                -moz-user-select: text !important;
+                -ms-user-select: text !important;
+                user-select: text !important;
+                pointer-events: auto !important;
+            }
+        `;
+        (document.head || document.documentElement || document.body).appendChild(style);
     };
 
-    // Run on page load and observe for changes
+    // Inject styles immediately and after DOM loads
+    if (document.documentElement) {
+        injectStyles();
+    }
+    
+    // Run cleanup after DOM loads
+    const runAfterLoad = () => {
+        if (!document.getElementById('copy-paste-enabler-style')) {
+            injectStyles();
+        }
+        clearAllBlockingHandlers();
+    };
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', enableElements);
+        document.addEventListener('DOMContentLoaded', runAfterLoad);
     } else {
-        enableElements();
+        setTimeout(runAfterLoad, 0);
     }
 
-    // Watch for dynamic content
+    // Watch for dynamic content and clear blocking handlers
     if (typeof MutationObserver !== 'undefined') {
         const observer = new MutationObserver((mutations) => {
             mutations.forEach(mutation => {
                 mutation.addedNodes.forEach(node => {
                     if (node.nodeType === 1) {
                         clearBlockingHandlers(node);
-                        node.querySelectorAll && node.querySelectorAll('*').forEach(clearBlockingHandlers);
+                        if (node.querySelectorAll) {
+                            node.querySelectorAll('*').forEach(clearBlockingHandlers);
+                        }
                     }
                 });
             });
         });
-        observer.observe(document.documentElement || document.body, { 
-            childList: true, 
-            subtree: true 
-        });
+        
+        // Start observing when possible
+        const startObserving = () => {
+            const target = document.documentElement || document.body;
+            if (target) {
+                observer.observe(target, { childList: true, subtree: true });
+            } else {
+                setTimeout(startObserving, 10);
+            }
+        };
+        startObserving();
     }
 
     // Bypass webdriver detection
