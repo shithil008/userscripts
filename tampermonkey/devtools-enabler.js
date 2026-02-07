@@ -60,10 +60,19 @@
         e.stopImmediatePropagation();
     }, true);
 
-    // Re-enable text selection and copy/paste
+    // Re-enable text selection and copy/paste - Comprehensive approach
     ['selectstart', 'dragstart', 'cut', 'copy', 'paste'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
             e.stopImmediatePropagation();
+            e.stopPropagation();
+            e.preventDefault(); // Allow default behavior
+            
+            // Trigger native clipboard events after prevention
+            if (e.type === 'copy' || e.type === 'cut' || e.type === 'paste') {
+                setTimeout(() => {
+                    document.dispatchEvent(new Event(e.type, { bubbles: true }));
+                }, 0);
+            }
         }, true);
     });
 
