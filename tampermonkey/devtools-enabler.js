@@ -33,13 +33,14 @@
     const originalStopPropagation = Event.prototype.stopPropagation;
     const originalStopImmediatePropagation = Event.prototype.stopImmediatePropagation;
 
-    // Protected event types that should never be blockable
-    const protectedEvents = ['copy', 'cut', 'paste', 'selectstart', 'contextmenu', 'mousedown', 'mouseup', 'keydown', 'keyup'];
+    // Only protect specific events - not keyboard/mouse events as those are too general
+    const protectedEvents = ['copy', 'cut', 'paste', 'selectstart', 'contextmenu'];
 
     // Override preventDefault - when sites call e.preventDefault() on protected events, ignore it
     Event.prototype.preventDefault = function() {
         if (protectedEvents.includes(this.type)) {
             // Silently ignore - let the event's default action happen
+            console.log('[Copy/Paste Enabler] Blocked preventDefault on:', this.type);
             return;
         }
         return originalPreventDefault.apply(this, arguments);
@@ -48,6 +49,7 @@
     // Override stopPropagation - let protected events propagate freely
     Event.prototype.stopPropagation = function() {
         if (protectedEvents.includes(this.type)) {
+            console.log('[Copy/Paste Enabler] Blocked stopPropagation on:', this.type);
             return;
         }
         return originalStopPropagation.apply(this, arguments);
@@ -56,6 +58,7 @@
     // Override stopImmediatePropagation - let protected events propagate freely
     Event.prototype.stopImmediatePropagation = function() {
         if (protectedEvents.includes(this.type)) {
+            console.log('[Copy/Paste Enabler] Blocked stopImmediatePropagation on:', this.type);
             return;
         }
         return originalStopImmediatePropagation.apply(this, arguments);
@@ -68,26 +71,48 @@
         configurable: false
     });
 
-    // Handle keyboard shortcuts - protect them from being blocked
-    ['keydown', 'keypress', 'keyup'].forEach(eventType => {
+    // Also override the return value property
+    const originalReturnValue = Object.getOwnPropertyDescriptor(Event.prototype, 'returnValue');
+    if (originalReturnValue) {
+        Object.defineProperty(Event.prototype, 'returnValue', {
+            get: function() {
+                if (protectedEvents.includes(this.type)) {
+                    return true; // Always indicate event is not prevented
+                }
+                return originalReturnValue.get ? originalReturnValue.get.call(this) : true;
+            },
+            set: function(val) {
+                if (protectedEvents.includes(this.type)) {
+                    // Ignore attempts to set returnValue to false
+                    return;
+                }
+                if (originalReturnValue.set) {
+                    originalReturnValue.set.call(this, val);
+                }
+            }
+        });
+    }
+
+    // Handle keyboard shortcuts - protect DevTools shortcuts only
+    ['keydown'].forEach(eventType => {
         document.addEventListener(eventType, function(e) {
             const ctrl = e.ctrlKey || e.metaKey;
             
-            // Check if it's a protected shortcut
-            const isProtectedShortcut = 
+            // Only protect DevTools shortcuts, let copy/paste shortcuts work normally
+            const isDevToolsShortcut = 
                 (e.keyCode === 123) || // F12
                 (ctrl && (e.shiftKey || e.altKey) && e.keyCode === 73) || // Inspect
                 (ctrl && (e.shiftKey || e.altKey) && e.keyCode === 74) || // Console
-                (ctrl && e.keyCode === 85) || // View Source
-                (ctrl && e.keyCode === 67) || // Copy
-                (ctrl && e.keyCode === 86) || // Paste
-                (ctrl && e.keyCode === 88) || // Cut
-                (ctrl && e.keyCode === 65);   // Select All
+                (ctrl && e.keyCode === 85); // View Source
             
-            if (isProtectedShortcut) {
-                // Ensure site code can't interfere - force event to continue
+            if (isDevToolsShortcut) {
+                // Stop site code from blocking DevTools
                 originalStopImmediatePropagation.call(e);
+                console.log('[Copy/Paste Enabler] Protected DevTools shortcut');
             }
+            
+            // For copy/paste shortcuts, don't stop propagation - let the event flow
+            // The Event.prototype overrides will prevent blocking
         }, true);
     });
 
