@@ -41,7 +41,7 @@
                 font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 z-index: 999999;
                 animation: slideIn 0.3s ease-out;
-                overflow: hidden;
+                overflow: visible;
             }
             
             @keyframes slideIn {
@@ -67,7 +67,7 @@
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 border-radius: 16px;
                 box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-                overflow: hidden;
+                overflow: visible;
                 backdrop-filter: blur(10px);
             }
             
@@ -101,6 +101,17 @@
             @keyframes pulse {
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.4; }
+            }
+            
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
             }
             
             .panel-controls {
@@ -806,40 +817,23 @@
             return;
         }
 
-        // Create backdrop overlay
-        const backdrop = document.createElement('div');
-        backdrop.id = 'pathao-credentials-backdrop';
-        backdrop.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0, 0, 0, 0.6);
-            z-index: 9999998;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            backdrop-filter: blur(2px);
-        `;
-
         // Create modal container
         const modal = document.createElement('div');
         modal.id = 'pathao-credentials-modal';
         modal.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            position: absolute;
+            top: 50px;
+            right: 10px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 12px;
             border-radius: 8px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-            z-index: 9999999;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            z-index: 1000000;
             max-width: 280px;
-            width: 90vw;
-            max-height: 90vh;
+            width: calc(100% - 20px);
+            max-height: 400px;
             overflow-y: auto;
+            animation: slideDown 0.2s ease-out;
         `;
 
         modal.innerHTML = `
@@ -875,13 +869,15 @@
             </div>
         `;
 
-        // Add to document
-        document.body.appendChild(backdrop);
-        document.body.appendChild(modal);
+        // Add to panel
+        const panel = document.getElementById('modernPanel');
+        if (panel) {
+            panel.style.position = 'relative';
+            panel.appendChild(modal);
+        }
 
         // Close modal function
         const closeModal = () => {
-            backdrop.remove();
             modal.remove();
         };
 
@@ -891,13 +887,15 @@
             closeBtn.addEventListener('click', closeModal);
         }
 
-        // Close on backdrop click
-        backdrop.addEventListener('click', closeModal);
-
-        // Prevent modal content click from closing
-        modal.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
+        // Close when clicking outside
+        setTimeout(() => {
+            document.addEventListener('click', function closeOnOutside(e) {
+                if (modal && !modal.contains(e.target) && !document.getElementById('cardBtn').contains(e.target)) {
+                    closeModal();
+                    document.removeEventListener('click', closeOnOutside);
+                }
+            });
+        }, 100);
 
         // Add event listeners for copy buttons
         setupCopyButtons(phone, pin);
