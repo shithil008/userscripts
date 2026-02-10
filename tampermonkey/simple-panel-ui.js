@@ -16,7 +16,11 @@
         currentStep: 'Initializing',
         requestCount: 0,
         lastUpdate: new Date().toLocaleTimeString(),
-        logs: []
+        logs: [],
+        credentials: {
+            phone: '',
+            pin: ''
+        }
     };
 
     // Add modern styles
@@ -614,6 +618,7 @@
                         ${state.panelTitle}
                     </div>
                     <div class="panel-controls">
+                        <button class="panel-btn" id="cardBtn" title="View Credentials">💳</button>
                         <button class="panel-btn" id="minimizeBtn" title="Minimize">−</button>
                         <button class="panel-btn" id="closeBtn" title="Close">×</button>
                     </div>
@@ -663,6 +668,10 @@
 
     // Setup event listeners
     function setupEventListeners() {
+        document.getElementById('cardBtn').addEventListener('click', () => {
+            displayPathaoPayCredentials();
+        });
+
         document.getElementById('minimizeBtn').addEventListener('click', () => {
             document.getElementById('modernPanel').classList.toggle('minimized');
             const btn = document.getElementById('minimizeBtn');
@@ -780,6 +789,186 @@
         addLog('Logs exported');
     }
 
+    // Display PathaoPay credentials modal
+    function displayPathaoPayCredentials() {
+        const phone = state.credentials.phone;
+        const pin = state.credentials.pin;
+
+        if (!phone || !pin) {
+            console.log('PathaoPay credentials not available');
+            addLog('⚠ Credentials not set');
+            return;
+        }
+
+        // Check if modal already exists
+        if (document.getElementById('pathao-credentials-modal')) {
+            console.log('PathaoPay credentials modal already displayed');
+            return;
+        }
+
+        // Create backdrop overlay
+        const backdrop = document.createElement('div');
+        backdrop.id = 'pathao-credentials-backdrop';
+        backdrop.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 99998;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(2px);
+        `;
+
+        // Create modal container
+        const modal = document.createElement('div');
+        modal.id = 'pathao-credentials-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 12px;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            z-index: 99999;
+            max-width: 280px;
+            width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+        `;
+
+        modal.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="color: white; font-weight: bold; font-size: 11px;">💳 PathaoPay Credentials</div>
+                <button id="close-credentials-btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: bold;">
+                    ✕
+                </button>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.15); padding: 8px; border-radius: 5px; margin-bottom: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="color: rgba(255,255,255,0.8); font-size: 9px; margin-bottom: 2px;">Phone Number</div>
+                        <div id="pathao-phone" style="color: white; font-weight: bold; font-size: 10px; font-family: monospace; overflow: hidden; text-overflow: ellipsis;">${phone}</div>
+                    </div>
+                    <button id="copy-phone-btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 9px; transition: all 0.2s; white-space: nowrap; flex-shrink: 0;">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.15); padding: 8px; border-radius: 5px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="color: rgba(255,255,255,0.8); font-size: 9px; margin-bottom: 2px;">PIN</div>
+                        <div id="pathao-pin" style="color: white; font-weight: bold; font-size: 10px; font-family: monospace; letter-spacing: 1px;">••••</div>
+                    </div>
+                    <button id="copy-pin-btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 9px; transition: all 0.2s; white-space: nowrap; flex-shrink: 0;">
+                        Copy
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Add to document
+        document.body.appendChild(backdrop);
+        document.body.appendChild(modal);
+
+        // Close modal function
+        const closeModal = () => {
+            backdrop.remove();
+            modal.remove();
+        };
+
+        // Close button event
+        const closeBtn = document.getElementById('close-credentials-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeModal);
+        }
+
+        // Close on backdrop click
+        backdrop.addEventListener('click', closeModal);
+
+        // Prevent modal content click from closing
+        modal.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // Add event listeners for copy buttons
+        setupCopyButtons(phone, pin);
+        console.log('PathaoPay credentials modal displayed successfully');
+        addLog('✓ Credentials modal opened');
+    }
+
+    // Setup copy buttons functionality
+    function setupCopyButtons(phone, pin) {
+        // Copy phone button
+        const copyPhoneBtn = document.getElementById('copy-phone-btn');
+        if (copyPhoneBtn) {
+            copyPhoneBtn.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(phone);
+                    copyPhoneBtn.textContent = '✓ Copied';
+                    copyPhoneBtn.style.background = 'rgba(76, 175, 80, 0.8)';
+                    addLog('✓ Phone number copied');
+                    setTimeout(() => {
+                        copyPhoneBtn.textContent = 'Copy';
+                        copyPhoneBtn.style.background = 'rgba(255,255,255,0.2)';
+                    }, 2000);
+                } catch (err) {
+                    console.error('Failed to copy phone:', err);
+                    addLog('✗ Failed to copy phone');
+                }
+            });
+
+            // Hover effect
+            copyPhoneBtn.addEventListener('mouseenter', () => {
+                copyPhoneBtn.style.background = 'rgba(255,255,255,0.3)';
+            });
+            copyPhoneBtn.addEventListener('mouseleave', () => {
+                if (copyPhoneBtn.textContent === 'Copy') {
+                    copyPhoneBtn.style.background = 'rgba(255,255,255,0.2)';
+                }
+            });
+        }
+
+        // Copy PIN button
+        const copyPinBtn = document.getElementById('copy-pin-btn');
+        if (copyPinBtn) {
+            copyPinBtn.addEventListener('click', async () => {
+                try {
+                    // Copy the actual PIN value (not the masked version)
+                    await navigator.clipboard.writeText(pin);
+                    copyPinBtn.textContent = '✓ Copied';
+                    copyPinBtn.style.background = 'rgba(76, 175, 80, 0.8)';
+                    addLog('✓ PIN copied');
+                    setTimeout(() => {
+                        copyPinBtn.textContent = 'Copy';
+                        copyPinBtn.style.background = 'rgba(255,255,255,0.2)';
+                    }, 2000);
+                } catch (err) {
+                    console.error('Failed to copy PIN:', err);
+                    addLog('✗ Failed to copy PIN');
+                }
+            });
+
+            // Hover effect
+            copyPinBtn.addEventListener('mouseenter', () => {
+                copyPinBtn.style.background = 'rgba(255,255,255,0.3)';
+            });
+            copyPinBtn.addEventListener('mouseleave', () => {
+                if (copyPinBtn.textContent === 'Copy') {
+                    copyPinBtn.style.background = 'rgba(255,255,255,0.2)';
+                }
+            });
+        }
+    }
+
     // Initialize function
     function init(options = {}) {
         addStyles();
@@ -817,7 +1006,13 @@
                 panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
             }
         },
-        getState: () => ({ ...state })
+        getState: () => ({ ...state }),
+        setCredentials: (phone, pin) => {
+            state.credentials.phone = phone;
+            state.credentials.pin = pin;
+            console.log('Credentials set successfully');
+        },
+        showCredentials: displayPathaoPayCredentials
     };
 
 })(window);
