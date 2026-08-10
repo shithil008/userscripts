@@ -248,7 +248,7 @@
             console.log('Stopped periodic email checking after OTP found.');
         }
 
-        alert(`OTP Found: ${otp}\nFrom: ${sender}\nSubject: ${subject}`);
+        localStorage.setItem("otp", otp);
         GM_setValue('latest_otp', otp);
         GM_setValue('otp_timestamp', new Date().toISOString());
     }
@@ -258,9 +258,22 @@
         checkIntervalId = setInterval(() => checkForEmails(allowedSenders), checkInterval);
     }
 
+    // Resets all state — call between applicants
+    function resetTempMail() {
+        authToken = null;
+        accountId = null;
+        otpFound = false;
+        if (checkIntervalId) {
+            clearInterval(checkIntervalId);
+            checkIntervalId = null;
+        }
+        currentAllowedSenders = [];
+    }
+
     window.createTempAccount = createTempAccount;
     window.checkForEmails = checkForEmails;
     window.startPeriodicCheck = startPeriodicCheck;
+    window.resetTempMail = resetTempMail;
 
 
 
