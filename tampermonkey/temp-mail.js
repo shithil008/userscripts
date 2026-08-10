@@ -9,6 +9,7 @@
     let otpFound = false;
     let checkIntervalId = null;
     let currentAllowedSenders = [];
+    let _resolveOtp = null;
 
     const otpPatterns = [
         /\b(\d{4,8})\b/,
@@ -251,11 +252,17 @@
         localStorage.setItem("otp", otp);
         GM_setValue('latest_otp', otp);
         GM_setValue('otp_timestamp', new Date().toISOString());
+
+        if (_resolveOtp) {
+            _resolveOtp(otp);
+            _resolveOtp = null;
+        }
     }
 
     function startPeriodicCheck(allowedSenders, checkInterval) {
         currentAllowedSenders = allowedSenders;
         checkIntervalId = setInterval(() => checkForEmails(allowedSenders), checkInterval);
+        return new Promise(resolve => { _resolveOtp = resolve; });
     }
 
     // Resets all state — call between applicants
@@ -268,6 +275,7 @@
             checkIntervalId = null;
         }
         currentAllowedSenders = [];
+        _resolveOtp = null;
     }
 
     window.createTempAccount = createTempAccount;
