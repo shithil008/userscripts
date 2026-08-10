@@ -1,92 +1,132 @@
 /*!
- * TimeHook.js — Hook the page clock and apply temporary time offsets.
- * Exposes: window.TimeHook.boost(milliseconds), window.TimeHook.reset(), window.TimeHook.getOffset()
+ * TimeHook.js
+ * A tiny clock-hooking library. It overrides the page's time sources so that
+ * scripts relying on the wall clock believe time has moved forward (or back).
  *
- * IMPORTANT: Requires @grant none (or runs in page context) so page scripts see the hooked time.
- * IMPORTANT: Requires @grant none (runs in page context) so page scripts see the hooked time.
- * Design note: the Date constructor is wrapped as a subclass and Date.now is patched,
- * but the native Date object and its prototype are never replaced, so frameworks
- * (Zone.js, Rocket Loader, etc.) that copy or extend Date keep working.
+ * Public API (attached to window.TimeHook):
+ *   boost(ms)        Apply a fixed offset in milliseconds (e.g. 30000 => +30s).
+ *   boostSeconds(s)  Convenience wrapper around boost() using seconds.
+ *   advance(ms)      Add to the current offset instead of replacing it.
+ *   reset()          Remove any offset, restoring real time.
+ *   getOffset()      Read the current offset in milliseconds.
+ *   isActive()       True when an offset is currently applied.
+ *
+ * Run it in the page context (userscript `@grant none`, `@run-at document-start`)
+ * so that the site's own scripts observe the hooked clock.
  */
-(function () {
+(function (global) {
     'use strict';
 
-    // Real (original) time sources
-    const realDateNow = Date.now;
-    const realPerfNow = performance.now.bind(performance);
-    const RealDate = Date;
-    const RealDate = window.Date;
-    const realDateNow = RealDate.now;
-    const realPerfNow = window.performance.now.bind(window.performance);
+    // Avoid double-installation if the script is injected more than once.
+    if (global.TimeHook && global.TimeHook.__installed) {
+        return;
+    }
 
-    // Offset in milliseconds applied while a boost is active
-    let offsetMs = 0;
+    // Snapshot the genuine time sources before anything is patched.
+    var NativeDate = global.Date;
+    var nativeDateNow = NativeDate.now;
+    var nativePerf = global.performance;
+    var nativePerfNow = nativePerf ? nativePerf.now.bind(nativePerf) : null;
 
-    // --- Hook Date.now ---
-    Date.now = function () {
-        return realDateNow() + offsetMs;
-    };
+    // The single source of truth for how far the clock is shifted.
+    var offsetMs = 0;
 
-    // --- Hook new Date() / Date() constructor ---
-    function HookedDate(...args) {
-        if (new.target) {
-            return args.length ? new RealDate(...args) : new RealDate(realDateNow() + offsetMs);
-    // Subclass so all native statics/prototype behavior are inherited untouched.
-    class HookedDate extends RealDate {
-        constructor(...args) {
-            if (args.length === 0) {
-                super(realDateNow() + offsetMs);
+    function currentEpoch() {
+        return nativeDateNow.call(NativeDate) + offsetMs;
+    }
+
+    // --- Hooked Date --------------------------------------------------------
+    // Subclassing keeps the whole Date prototype and every static method intact,
+    // so code that does `x instanceof Date`, `Date.parse`, etc. still works.
+    class HookedDate extends NativeDate {
+        constructor() {
+            if (arguments.length === 0) {
+                super(currentEpoch());
             } else {
-                super(...args);
+                super(...arguments);
             }
         }
-        return RealDate(realDateNow() + offsetMs).toString();
+
         static now() {
-            return realDateNow() + offsetMs;
+            return currentEpoch();
         }
     }
-    HookedDate.prototype = RealDate.prototype;
-    HookedDate.now = Date.now;
-    HookedDate.UTC = RealDate.UTC;
-    HookedDate.parse = RealDate.parse;
-    Date = HookedDate;
-    // Preserve identity cues frameworks rely on
-    Object.defineProperty(HookedDate, 'name', { value: 'Date', configurable: true });
-    try { Object.defineProperty(HookedDate, Symbol.toStringTag, { value: 'Date', configurable: true }); } catch (e) { /* noop */ }
 
-    // --- Hook performance.now ---
-    performance.now = function () {
-    // Replace only the now() on the shared object, keep prototype identical so Zone.js patches apply
-    window.Date = HookedDate;
-    window.performance.now = function () {
-        return realPerfNow() + offsetMs;
-    };
+    // Make the wrapper indistinguishable from the real Date for tooling that
+    // sniffs the constructor name or tag.
+    try {
+        Object.defineProperty(HookedDate, 'name', { value: 'Date', configurable: true });
+    } catch (e) { /* some engines lock this; harmless */ }
+    try {
+        Object.defineProperty(HookedDate, Symbol.toStringTag, { value: 'Date', configurable: true });
+    } catch (e) { /* noop */ }
 
-    // --- Public API ---
-    window.TimeHook = {
-        /**
-         * Temporarily shift the page timer forward by the given amount.
-         * @param {number} ms Offset in milliseconds (e.g. 30000 = +30 seconds)
-         */
+    global.Date = HookedDate;
+
+    // --- Hooked performance.now --------------------------------------------
+    // High-resolution timers (animation, countdown loops) should drift with the
+    // same offset so accelerated pages stay internally consistent.
+    if (nativePerf && nativePerfNow) {
+        try {
+            nativePerf.now = function now() {
+                return nativePerfNow() + offsetMs;
+            };
+        } catch (e) { /* read-only in some sandboxes */ }
+    }
+
+    // --- Logging ------------------------------------------------------------
+    function log() {
+        if (!global.console || !console.log) return;
+        var args = Array.prototype.slice.call(arguments);
+        args.unshift('[TimeHook]');
+        console.log.apply(console, args);
+    }
+
+    // --- Public API ---------------------------------------------------------
+    var api = {
+        __installed: true,
+
         boost: function (ms) {
-            offsetMs = ms;
-            console.log('[TimeHook] Boost active: +' + ms + 'ms (' + ms / 1000 + 's)');
-            if (window.console && console.log) console.log('[TimeHook] Boost active: +' + ms + 'ms');
+            offsetMs = Number(ms) || 0;
+            log('offset set to ' + offsetMs + 'ms (' + (offsetMs / 1000) + 's)');
+            return offsetMs;
         },
 
-        /**
-         * Reset the timer back to real time.
-         */
+        boostSeconds: function (seconds) {
+            return api.boost((Number(seconds) || 0) * 1000);
+        },
+
+        advance: function (ms) {
+            offsetMs += Number(ms) || 0;
+            log('offset advanced to ' + offsetMs + 'ms');
+            return offsetMs;
+        },
+
         reset: function () {
             offsetMs = 0;
-            console.log('[TimeHook] Timer reset to normal.');
-            if (window.console && console.log) console.log('[TimeHook] Timer reset to normal.');
+            log('offset cleared, real time restored');
+            return 0;
         },
 
-        /**
-         * Returns the current offset in milliseconds (0 when reset).
-         */
         getOffset: function () {
             return offsetMs;
+        },
+
+        isActive: function () {
+            return offsetMs !== 0;
         }
     };
+
+    // Expose the untouched natives for advanced callers / debugging.
+    Object.defineProperty(api, 'native', {
+        value: Object.freeze({
+            Date: NativeDate,
+            dateNow: nativeDateNow,
+            performanceNow: nativePerfNow
+        }),
+        enumerable: false
+    });
+
+    global.TimeHook = api;
+    log('installed');
+})(typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
