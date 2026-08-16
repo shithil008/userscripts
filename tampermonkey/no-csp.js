@@ -1,73 +1,48 @@
-// csp-disabler.js
-// Save this file locally or host it, then load via @require in Tampermonkey
-
+// no-csp.js — improved version
 (function(global) {
     'use strict';
 
     const CSPDisabler = {
         initialized: false,
         observer: null,
+        options: {},
 
         init: function(options) {
-            if (this.initialized) {
-                console.log('[CSP Disabler] Already initialized');
-                return this;
-            }
+            if (this.initialized) return this;
 
-            options = Object.assign({
-                stripHeaders: true,
+            this.options = Object.assign({
                 stripMetaTags: true,
-                blockViolationReports: true,
                 hookCreateElement: true,
+                hookPropertySetters: true,
+                blockViolationReports: true,
                 verbose: true
             }, options || {});
 
-            this.options = options;
+            const opts = this.options;
 
-            // Method 1: Strip CSP headers via GM_webRequest
-            if (options.stripHeaders && typeof GM_webRequest !== 'undefined') {
-                try {
-                    GM_webRequest([
-                        { selector: '*', action: 'cancel' }
-                    ], function(info) {
-                        if (info.responseHeaders) {
-                            const headers = info.responseHeaders.filter(h => {
-                                const name = h.name.toLowerCase();
-                                return name !== 'content-security-policy' &&
-                                       name !== 'content-security-policy-report-only' &&
-                                       name !== 'x-content-security-policy' &&
-                                       name !== 'x-webkit-csp';
-                            });
-                            return { responseHeaders: headers };
-                        }
-                    });
-                    if (options.verbose) console.log('[CSP Disabler] GM_webRequest hooked');
-                } catch (e) {
-                    console.warn('[CSP Disabler] GM_webRequest failed:', e);
-                }
-            }
-
-            // Method 2: Remove existing CSP meta tags
-            if (options.stripMetaTags) {
+            if (opts.stripMetaTags) {
                 this._removeExistingMetaTags();
                 this._setupMetaObserver();
-                if (options.verbose) console.log('[CSP Disabler] Meta tag watcher active');
+                if (opts.verbose) console.log('[CSP Disabler] Meta tag watcher active');
             }
 
-            // Method 3: Hook document.createElement to block CSP meta injection
-            if (options.hookCreateElement) {
+            if (opts.hookCreateElement) {
                 this._hookCreateElement();
-                if (options.verbose) console.log('[CSP Disabler] createElement hooked');
+                if (opts.verbose) console.log('[CSP Disabler] createElement hooked');
             }
 
-            // Method 4: Block CSP violation reports
-            if (options.blockViolationReports) {
+            if (opts.hookPropertySetters) {
+                this._hookPropertySetters();
+                if (opts.verbose) console.log('[CSP Disabler] Property setters hooked');
+            }
+
+            if (opts.blockViolationReports) {
                 this._blockViolationReports();
-                if (options.verbose) console.log('[CSP Disabler] Violation reports blocked');
+                if (opts.verbose) console.log('[CSP Disabler] Violation reports blocked');
             }
 
             this.initialized = true;
-            if (options.verbose) console.log('[CSP Disabler] Initialized');
+            if (opts.verbose) console.log('[CSP Disabler] Initialized (meta-tag CSP only)');
 
             return this;
         },
@@ -85,36 +60,35 @@
 
         _setupMetaObserver: function() {
             const self = this;
-            this.observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                    mutation.addedNodes.forEach((node) => {
-                        if (node.nodeName === 'META') {
-                            const equiv = node.getAttribute('http-equiv') || '';
-                            if (/content-security-policy/i.test(equiv)) {
-                                node.remove();
-                                if (self.options.verbose) console.log('[CSP Disabler] Blocked injected CSP meta tag');
+            const tryObserve = () => {
+                const target = document.documentElement || document.head;
+                if (!target) return false;
+                this.observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        mutation.addedNodes.forEach((node) => {
+                            if (node.nodeName === 'META') {
+                                const equiv = node.getAttribute('http-equiv') || '';
+                                if (/content-security-policy/i.test(equiv)) {
+                                    node.remove();
+                                    if (self.options.verbose) console.log('[CSP Disabler] Blocked injected CSP meta tag');
+                                }
                             }
-                        }
+                        });
                     });
                 });
-            });
-
-            const target = document.documentElement || document.head || document.body;
-            if (target) {
                 this.observer.observe(target, { childList: true, subtree: true });
-            } else {
-                // Wait for document to be ready
-                if (document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', () => {
-                        self._removeExistingMetaTags();
-                        if (document.documentElement) {
-                            self.observer.observe(document.documentElement, {
-                                childList: true,
-                                subtree: true
-                            });
-                        }
-                    });
-                }
+                return true;
+            };
+
+            if (!tryObserve()) {
+                // Retry when DOM is available
+                const check = () => {
+                    if (tryObserve()) return;
+                    if (document.readyState !== 'complete') {
+                        setTimeout(check, 10);
+                    }
+                };
+                check();
             }
         },
 
@@ -126,18 +100,52 @@
                 const element = originalCreateElement.call(document, tagName);
 
                 if (tagName.toLowerCase() === 'meta') {
+                    // Hook setAttribute
                     const originalSetAttribute = element.setAttribute;
                     element.setAttribute = function(name, value) {
                         if (name.toLowerCase() === 'http-equiv' &&
                             /content-security-policy/i.test(value || '')) {
-                            if (self.options.verbose) console.log('[CSP Disabler] Blocked meta CSP creation');
+                            if (self.options.verbose) console.log('[CSP Disabler] Blocked meta.setAttribute CSP');
                             return;
                         }
                         return originalSetAttribute.call(this, name, value);
                     };
+
+                    // Hook httpEquiv property
+                    let httpEquivValue = '';
+                    Object.defineProperty(element, 'httpEquiv', {
+                        get: () => httpEquivValue,
+                        set: (value) => {
+                            if (/content-security-policy/i.test(value || '')) {
+                                if (self.options.verbose) console.log('[CSP Disabler] Blocked meta.httpEquiv CSP');
+                                return;
+                            }
+                            httpEquivValue = value;
+                        },
+                        configurable: true
+                    });
                 }
 
                 return element;
+            };
+        },
+
+        _hookPropertySetters: function() {
+            // Hook document.head.appendChild to catch direct meta insertion
+            const self = this;
+            const head = document.head;
+            if (!head) return;
+
+            const originalAppendChild = head.appendChild;
+            head.appendChild = function(node) {
+                if (node.nodeName === 'META') {
+                    const equiv = node.getAttribute('http-equiv') || node.httpEquiv || '';
+                    if (/content-security-policy/i.test(equiv)) {
+                        if (self.options.verbose) console.log('[CSP Disabler] Blocked head.appendChild CSP meta');
+                        return node;
+                    }
+                }
+                return originalAppendChild.call(this, node);
             };
         },
 
@@ -145,7 +153,7 @@
             window.addEventListener('securitypolicyviolation', (e) => {
                 e.stopImmediatePropagation();
                 e.preventDefault();
-                if (this.options.verbose) console.log('[CSP Disabler] Blocked CSP violation report for:', e.blockedURI);
+                if (this.options.verbose) console.log('[CSP Disabler] Blocked violation report:', e.blockedURI);
             }, true);
         },
 
@@ -159,19 +167,13 @@
         }
     };
 
-    // Auto-initialize if in a userscript environment
+    // Auto-init in userscript environment
     if (typeof GM_info !== 'undefined' || typeof GM !== 'undefined' || typeof unsafeWindow !== 'undefined') {
-        if (document.readyState === 'loading') {
-            CSPDisabler.init();
-        } else {
-            CSPDisabler.init();
-        }
+        CSPDisabler.init();
     }
 
-    // Expose to global scope
     global.CSPDisabler = CSPDisabler;
 
-    // Also expose as module if applicable
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = CSPDisabler;
     }
