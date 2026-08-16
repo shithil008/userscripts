@@ -1,4 +1,4 @@
-// no-csp.js — improved version
+// no-csp.js
 (function(global) {
     'use strict';
 
