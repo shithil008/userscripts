@@ -1,4 +1,6 @@
 // no-csp.js
+// Load via @require in Tampermonkey/Violentmonkey/Greasemonkey
+
 (function(global) {
     'use strict';
 
@@ -14,6 +16,7 @@
                 stripMetaTags: true,
                 hookCreateElement: true,
                 hookPropertySetters: true,
+                hookAppendChild: true,
                 blockViolationReports: true,
                 verbose: true
             }, options || {});
@@ -36,6 +39,11 @@
                 if (opts.verbose) console.log('[CSP Disabler] Property setters hooked');
             }
 
+            if (opts.hookAppendChild) {
+                this._hookAppendChild();
+                if (opts.verbose) console.log('[CSP Disabler] appendChild hooked');
+            }
+
             if (opts.blockViolationReports) {
                 this._blockViolationReports();
                 if (opts.verbose) console.log('[CSP Disabler] Violation reports blocked');
@@ -47,11 +55,16 @@
             return this;
         },
 
+        _isCSPMeta: function(node) {
+            if (!node || node.nodeName !== 'META') return false;
+            const equiv = (node.getAttribute('http-equiv') || node.httpEquiv || '').toLowerCase();
+            return equiv.includes('content-security-policy');
+        },
+
         _removeExistingMetaTags: function() {
             const metaTags = document.querySelectorAll('meta[http-equiv]');
             metaTags.forEach(meta => {
-                const equiv = meta.getAttribute('http-equiv') || '';
-                if (/content-security-policy/i.test(equiv)) {
+                if (this._isCSPMeta(meta)) {
                     meta.remove();
                     if (this.options.verbose) console.log('[CSP Disabler] Removed CSP meta tag');
                 }
@@ -63,25 +76,23 @@
             const tryObserve = () => {
                 const target = document.documentElement || document.head;
                 if (!target) return false;
+
                 this.observer = new MutationObserver((mutations) => {
                     mutations.forEach((mutation) => {
                         mutation.addedNodes.forEach((node) => {
-                            if (node.nodeName === 'META') {
-                                const equiv = node.getAttribute('http-equiv') || '';
-                                if (/content-security-policy/i.test(equiv)) {
-                                    node.remove();
-                                    if (self.options.verbose) console.log('[CSP Disabler] Blocked injected CSP meta tag');
-                                }
+                            if (self._isCSPMeta(node)) {
+                                node.remove();
+                                if (self.options.verbose) console.log('[CSP Disabler] Blocked injected CSP meta tag');
                             }
                         });
                     });
                 });
+
                 this.observer.observe(target, { childList: true, subtree: true });
                 return true;
             };
 
             if (!tryObserve()) {
-                // Retry when DOM is available
                 const check = () => {
                     if (tryObserve()) return;
                     if (document.readyState !== 'complete') {
@@ -131,22 +142,59 @@
         },
 
         _hookPropertySetters: function() {
-            // Hook document.head.appendChild to catch direct meta insertion
+            // Hook on <meta> elements created before our script ran
             const self = this;
-            const head = document.head;
-            if (!head) return;
+            const originalDefineProperty = Object.defineProperty;
 
-            const originalAppendChild = head.appendChild;
-            head.appendChild = function(node) {
-                if (node.nodeName === 'META') {
-                    const equiv = node.getAttribute('http-equiv') || node.httpEquiv || '';
-                    if (/content-security-policy/i.test(equiv)) {
-                        if (self.options.verbose) console.log('[CSP Disabler] Blocked head.appendChild CSP meta');
-                        return node;
+            Object.defineProperty = function(obj, prop, descriptor) {
+                if (obj && obj.nodeName === 'META' && prop === 'httpEquiv') {
+                    const originalSet = descriptor.set;
+                    if (originalSet) {
+                        descriptor.set = function(value) {
+                            if (/content-security-policy/i.test(value || '')) {
+                                if (self.options.verbose) console.log('[CSP Disabler] Blocked Object.defineProperty CSP');
+                                return;
+                            }
+                            return originalSet.call(this, value);
+                        };
                     }
                 }
-                return originalAppendChild.call(this, node);
+                return originalDefineProperty.call(this, obj, prop, descriptor);
             };
+        },
+
+        _hookAppendChild: function() {
+            const self = this;
+            const nodes = [document.documentElement, document.head, document.body].filter(Boolean);
+
+            nodes.forEach((target) => {
+                if (!target._cspHooked) {
+                    const originalAppendChild = target.appendChild;
+                    target.appendChild = function(node) {
+                        if (self._isCSPMeta(node)) {
+                            if (self.options.verbose) console.log('[CSP Disabler] Blocked appendChild CSP meta');
+                            return node;
+                        }
+                        return originalAppendChild.call(this, node);
+                    };
+                    target._cspHooked = true;
+                }
+            });
+
+            // Also hook insertBefore
+            nodes.forEach((target) => {
+                if (!target._cspInsertHooked) {
+                    const originalInsertBefore = target.insertBefore;
+                    target.insertBefore = function(node, ref) {
+                        if (self._isCSPMeta(node)) {
+                            if (self.options.verbose) console.log('[CSP Disabler] Blocked insertBefore CSP meta');
+                            return node;
+                        }
+                        return originalInsertBefore.call(this, node, ref);
+                    };
+                    target._cspInsertHooked = true;
+                }
+            });
         },
 
         _blockViolationReports: function() {
@@ -172,8 +220,10 @@
         CSPDisabler.init();
     }
 
+    // Expose to global scope
     global.CSPDisabler = CSPDisabler;
 
+    // Module export
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = CSPDisabler;
     }
